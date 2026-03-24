@@ -216,6 +216,7 @@ You are a specialized agent that does X...
 | `skills` | string | Comma-separated skill names to auto-load |
 | `spawning` | boolean | Set `false` to deny all subagent-spawning tools |
 | `deny-tools` | string | Comma-separated extension tool names to deny |
+| `auto-exit` | boolean | Auto-shutdown when the agent finishes its turn (no need for `subagent_done` call) |
 | `cwd` | string | Default working directory (absolute or relative to project root) |
 
 ---

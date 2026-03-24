@@ -68,6 +68,8 @@ export default function (pi: ExtensionAPI) {
     );
   }
 
+  const autoExit = process.env.PI_SUBAGENT_AUTO_EXIT === "1";
+
   // Show widget + status bar on session start
   pi.on("session_start", (_event, ctx) => {
     const tools = pi.getAllTools();
@@ -79,6 +81,26 @@ export default function (pi: ExtensionAPI) {
 
     renderWidget(ctx, null);
   });
+
+  // Auto-exit: when the agent loop ends, shut down automatically.
+  // If the user sends any input (stops the agent, types a message), auto-exit
+  // is permanently disabled for this session — the user has taken over.
+  // Enabled via `auto-exit: true` in agent frontmatter.
+  if (autoExit) {
+    let userTookOver = false;
+
+    pi.on("input", (event) => {
+      if ((event as any).source === "user") {
+        userTookOver = true;
+      }
+    });
+
+    pi.on("agent_end", (_event, ctx) => {
+      if (!userTookOver) {
+        ctx.shutdown();
+      }
+    });
+  }
 
   // Toggle expand/collapse with Ctrl+J
   pi.registerShortcut("ctrl+j", {

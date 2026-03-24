@@ -45,6 +45,7 @@ interface AgentDefaults {
   thinking?: string;
   denyTools?: string;
   spawning?: boolean;
+  autoExit?: boolean;
   cwd?: string;
   body?: string;
 }
@@ -95,6 +96,7 @@ function loadAgentDefaults(agentName: string): AgentDefaults | null {
     // Extract body (everything after frontmatter)
     const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
     const spawningRaw = get("spawning");
+    const autoExitRaw = get("auto-exit");
     return {
       model: get("model"),
       tools: get("tools"),
@@ -102,6 +104,7 @@ function loadAgentDefaults(agentName: string): AgentDefaults | null {
       thinking: get("thinking"),
       denyTools: get("deny-tools"),
       spawning: spawningRaw != null ? spawningRaw === "true" : undefined,
+      autoExit: autoExitRaw != null ? autoExitRaw === "true" : undefined,
       cwd: get("cwd"),
       body: body || undefined,
     };
@@ -445,6 +448,9 @@ async function launchSubagent(
   envParts.push(`PI_SUBAGENT_NAME=${shellEscape(params.name)}`);
   if (params.agent) {
     envParts.push(`PI_SUBAGENT_AGENT=${shellEscape(params.agent)}`);
+  }
+  if (agentDefs?.autoExit) {
+    envParts.push(`PI_SUBAGENT_AUTO_EXIT=1`);
   }
   const envPrefix = envParts.join(" ") + " ";
 
