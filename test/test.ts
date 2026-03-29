@@ -17,6 +17,10 @@ import {
 } from "../pi-extension/subagents/session.ts";
 
 import { shellEscape, isCmuxAvailable } from "../pi-extension/subagents/cmux.ts";
+import {
+  shouldMarkUserTookOver,
+  shouldAutoExitOnAgentEnd,
+} from "../pi-extension/subagents/subagent-done.ts";
 
 // --- Helpers ---
 
@@ -248,6 +252,34 @@ describe("session.ts", () => {
   });
 });
 
+describe("subagent-done.ts", () => {
+  describe("shouldMarkUserTookOver", () => {
+    it("ignores the initial injected task before the first agent run", () => {
+      assert.equal(shouldMarkUserTookOver(false), false);
+    });
+
+    it("treats later input as manual takeover", () => {
+      assert.equal(shouldMarkUserTookOver(true), true);
+    });
+  });
+
+  describe("shouldAutoExitOnAgentEnd", () => {
+    it("auto-exits after normal completion when there was no takeover", () => {
+      const messages = [{ role: "assistant", stopReason: "stop" }];
+      assert.equal(shouldAutoExitOnAgentEnd(false, messages), true);
+    });
+
+    it("stays open after user takeover for that cycle", () => {
+      const messages = [{ role: "assistant", stopReason: "stop" }];
+      assert.equal(shouldAutoExitOnAgentEnd(true, messages), false);
+    });
+
+    it("stays open after Escape aborts the run", () => {
+      const messages = [{ role: "assistant", stopReason: "aborted" }];
+      assert.equal(shouldAutoExitOnAgentEnd(false, messages), false);
+    });
+  });
+});
 describe("subagents widget rendering", () => {
   it("keeps every rendered line within a very narrow width", () => {
     const testApi = (subagentsModule as any).__test__;
