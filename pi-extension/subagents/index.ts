@@ -24,6 +24,7 @@ import {
   exitStatusVar,
   renameCurrentTab,
   renameWorkspace,
+  setSessionNameCallback,
 } from "./cmux.ts";
 import { getNewEntries, findLastAssistantMessage } from "./session.ts";
 
@@ -676,6 +677,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   // Capture the UI context for widget updates
   pi.on("session_start", (_event, ctx) => {
     latestCtx = ctx;
+    setSessionNameCallback((name) => pi.setSessionName(name));
   });
 
   // Clean up on session shutdown
@@ -803,6 +805,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
               { triggerTurn: true, deliverAs: "steer" },
             );
           });
+
+        // Update pi session name to reflect the active subagent
+        pi.setSessionName(params.name);
 
         // Return immediately
         return {
