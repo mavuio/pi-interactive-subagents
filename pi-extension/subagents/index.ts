@@ -1305,5 +1305,36 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       );
     },
   });
+
+  // /qrspi command — Questions → Research → Structure → Plan → Implement
+  pi.registerCommand("qrspi", {
+    description: "Start a QRSPI session: /qrspi <what to build>",
+    handler: async (args, ctx) => {
+      const task = (args ?? "").trim();
+      if (!task) {
+        ctx.ui.notify("Usage: /qrspi <what to build>", "warning");
+        return;
+      }
+
+      // Rename workspace and tab to show this is a QRSPI session
+      if (isMuxAvailable()) {
+        try {
+          const label = task.length > 40 ? task.slice(0, 40) + "..." : task;
+          renameWorkspace(`🏗️ ${label}`);
+          renameCurrentTab(`🏗️ QRSPI: ${label}`);
+        } catch {
+          // non-critical -- do not block the flow
+        }
+      }
+
+      // Load the QRSPI skill from the subagents extension directory
+      const qrspiSkillPath = join(dirname(new URL(import.meta.url).pathname), "qrspi-skill.md");
+      let content = readFileSync(qrspiSkillPath, "utf8");
+      content = content.replace(/^---\n[\s\S]*?\n---\n*/, "");
+      pi.sendUserMessage(
+        `<skill name="qrspi" location="${qrspiSkillPath}">\n${content.trim()}\n</skill>\n\n${task}`,
+      );
+    },
+  });
 }
 // test

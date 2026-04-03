@@ -415,6 +415,9 @@ export function renameWorkspace(title: string): void {
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
+    if (process.env.PI_SUBAGENT_RENAME_CMUX_WORKSPACE !== "1") {
+      return;
+    }
     execSync(`cmux workspace-action --action rename --title ${shellEscape(title)}`, {
       encoding: "utf8",
     });
