@@ -176,6 +176,9 @@ async function zellijActionAsync(args: string[], surface?: string): Promise<stri
 /** Tracked subagent pane for cmux — reused across subagent launches. */
 let cmuxSubagentPane: string | null = null;
 
+// PATCH(local): Use pi.setSessionName() instead of cmux workspace-action for workspace renaming.
+// This avoids the cmux rename side-effect; pi's internal session name is set instead.
+// See PATCHES.md § cmux-session-name
 /** Optional callback to rename the pi session (injected from index.ts). */
 let sessionNameSetter: ((name: string) => void) | null = null;
 
@@ -426,7 +429,7 @@ export function renameWorkspace(title: string): void {
   const backend = requireMuxBackend();
 
   if (backend === "cmux") {
-    sessionNameSetter?.(title);
+    sessionNameSetter?.(title); // PATCH(local): see PATCHES.md § cmux-session-name
     return;
   }
 

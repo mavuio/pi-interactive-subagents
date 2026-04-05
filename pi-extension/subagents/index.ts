@@ -24,7 +24,7 @@ import {
   exitStatusVar,
   renameCurrentTab,
   renameWorkspace,
-  setSessionNameCallback,
+  setSessionNameCallback, // PATCH(local): see PATCHES.md § cmux-session-name
 } from "./cmux.ts";
 import { getNewEntries, findLastAssistantMessage } from "./session.ts";
 
@@ -683,7 +683,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   // Capture the UI context for widget updates
   pi.on("session_start", (_event, ctx) => {
     latestCtx = ctx;
-    setSessionNameCallback((name) => pi.setSessionName(name));
+    setSessionNameCallback((name) => pi.setSessionName(name)); // PATCH(local): see PATCHES.md § cmux-session-name
   });
 
   // Clean up on session shutdown
@@ -812,7 +812,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             );
           });
 
-        // Update pi session name to reflect the active subagent
+        // PATCH(local): Update pi session name to reflect the active subagent
+        // See PATCHES.md § cmux-session-name
         pi.setSessionName(params.name);
 
         // Return immediately
@@ -1317,35 +1318,5 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     },
   });
 
-  // /qrspi command — Questions → Research → Structure → Plan → Implement
-  pi.registerCommand("qrspi", {
-    description: "Start a QRSPI session: /qrspi <what to build>",
-    handler: async (args, ctx) => {
-      const task = (args ?? "").trim();
-      if (!task) {
-        ctx.ui.notify("Usage: /qrspi <what to build>", "warning");
-        return;
-      }
-
-      // Rename workspace and tab to show this is a QRSPI session
-      if (isMuxAvailable()) {
-        try {
-          const label = task.length > 40 ? task.slice(0, 40) + "..." : task;
-          renameWorkspace(`🏗️ ${label}`);
-          renameCurrentTab(`🏗️ QRSPI: ${label}`);
-        } catch {
-          // non-critical -- do not block the flow
-        }
-      }
-
-      // Load the QRSPI skill from the subagents extension directory
-      const qrspiSkillPath = join(dirname(new URL(import.meta.url).pathname), "qrspi-skill.md");
-      let content = readFileSync(qrspiSkillPath, "utf8");
-      content = content.replace(/^---\n[\s\S]*?\n---\n*/, "");
-      pi.sendUserMessage(
-        `<skill name="qrspi" location="${qrspiSkillPath}">\n${content.trim()}\n</skill>\n\n${task}`,
-      );
-    },
-  });
 }
 // test
