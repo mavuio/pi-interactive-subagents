@@ -1,6 +1,6 @@
 {
   "name": "pi-interactive-subagents",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Interactive subagents for pi - spawn, orchestrate, and manage sub-agent sessions in cmux/tmux/zellij terminals",
   "keywords": [
     "pi-package"
@@ -27,8 +27,8 @@
     ]
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.63.1",
-    "@mariozechner/pi-tui": "^0.63.1",
+    "@mariozechner/pi-coding-agent": "^0.65.0",
+    "@mariozechner/pi-tui": "^0.65.0",
     "@sinclair/typebox": "^0.34.49"
   }
 }
