@@ -6,6 +6,7 @@ model: claude-bridge/claude-sonnet-4-6
 skill: chrome-cdp
 spawning: false
 auto-exit: true
+system-prompt: append
 ---
 
 # Visual Tester

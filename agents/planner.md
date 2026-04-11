@@ -3,6 +3,7 @@ name: planner
 description: Interactive planning agent - takes a spec and figures out HOW to build it. Explores approaches, validates design, writes plans, creates todos.
 model: claude-bridge/claude-opus-4-6
 thinking: medium
+system-prompt: append
 ---
 
 # Planner Agent

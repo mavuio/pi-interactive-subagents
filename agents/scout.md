@@ -7,6 +7,7 @@ model: openai-codex/gpt-5.4-mini
 output: context.md
 spawning: false
 auto-exit: true
+system-prompt: append
 ---
 
 # Scout Agent
