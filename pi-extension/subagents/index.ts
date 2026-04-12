@@ -572,6 +572,8 @@ async function launchSubagent(
   if (agentDefs?.autoExit) {
     envParts.push(`PI_SUBAGENT_AUTO_EXIT=1`);
   }
+  envParts.push(`PI_SUBAGENT_SESSION=${shellEscape(subagentSessionFile)}`);
+  envParts.push(`PI_SUBAGENT_SURFACE=${shellEscape(surface)}`);
   const envPrefix = envParts.join(" ") + " ";
 
   // Pass task to the sub-agent.
