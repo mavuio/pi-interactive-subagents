@@ -21,6 +21,7 @@ pi-extension/
 | `pi.setSessionName()` for workspace rename | `pi-extension/subagents/cmux.ts`, `index.ts` | Patches to upstream — see [PATCHES.md](./PATCHES.md) |
 | Single-dash session directory delimiters | `pi-extension/subagents/index.ts`, `node_modules/@mariozechner/pi-coding-agent/dist/core/session-manager.js` | Patch in repo + post-install patch — see [PATCHES.md](./PATCHES.md) |
 | Custom extension registration | `package.json` → `pi.extensions[]` | One extra line |
+| Local agent overrides | `~/mavu-macbook/pi/agents/*.md` | External to repo — sync manually when upstream bundled agents change |
 
 All patches in upstream files are marked with `// PATCH(local):` comments.
 
@@ -46,10 +47,14 @@ grep -rn "PATCH(local)" node_modules/@mariozechner/pi-coding-agent/dist/
 #   index.ts:876  — PATCH(local): pi.setSessionName on subagent launch
 #   core/session-manager.js:209 — PATCH(local): single-dash default session dir
 
-# 4. Run tests
+# 4. Review local agent overrides outside this repo
+#    Path: ~/mavu-macbook/pi/agents/
+#    Preserve local model/thinking overrides, but port upstream prompt/frontmatter changes.
+
+# 5. Run tests
 npm test
 
-# 5. If patches were lost during merge, see PATCHES.md for re-application instructions
+# 6. If patches were lost during merge, see PATCHES.md for re-application instructions
 ```
 
 ## If a Patch Is Lost After Merge

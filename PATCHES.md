@@ -86,3 +86,24 @@ const safePath = `-${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}-`; // PA
 - `index.ts` — registers `/qrspi` command
 - `qrspi-skill.md` — QRSPI skill file
 - Registered in `package.json` → `pi.extensions[]` (this is a minor merge point)
+
+---
+
+## Local agent overrides: `~/mavu-macbook/pi/agents/`
+
+**Not a patch in this repo** — these are external/local agent definitions maintained outside this repository.
+
+When upstream changes bundled agents, manually review and apply relevant updates to your local overrides in:
+
+- `~/mavu-macbook/pi/agents/planner.md`
+- `~/mavu-macbook/pi/agents/reviewer.md`
+- `~/mavu-macbook/pi/agents/scout.md`
+- `~/mavu-macbook/pi/agents/spec.md`
+- `~/mavu-macbook/pi/agents/visual-tester.md`
+- `~/mavu-macbook/pi/agents/worker.md`
+
+Typical rule:
+- preserve your local model/thinking overrides
+- port upstream prompt/rules/frontmatter changes as needed
+
+See `CHANGES_1.7.0.md` for an example of a local-agent sync after an upstream upgrade.
