@@ -128,7 +128,7 @@ function resolveSubagentPaths(
 }
 
 function getDefaultSessionDirFor(cwd: string, agentDir: string): string {
-  const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  const safePath = `-${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}-`; // PATCH(local): single dash delimiters, see PATCHES.md § session-dir-single-dash
   const sessionDir = join(agentDir, "sessions", safePath);
   if (!existsSync(sessionDir)) {
     mkdirSync(sessionDir, { recursive: true });

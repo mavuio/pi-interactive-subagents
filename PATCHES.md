@@ -48,14 +48,25 @@ If upstream changes the `session_start` handler or `subagent` tool in `index.ts`
 
 **Purpose:** Session directories use single-dash delimiters instead of double-dash, producing cleaner paths like `-Users-manfred-Documents-www-tradeomat-` instead of `--Users-manfred-Documents-www-tradeomat--`.
 
-**Upstream behaviour:** `getDefaultSessionDir()` wraps the encoded cwd with `--` prefix and suffix
-**Patched behaviour:** Uses single `-` prefix and suffix
+**Upstream behaviour:** Session directory helpers wrap the encoded cwd with `--` prefix and suffix
+**Patched behaviour:** Uses single `-` prefix and suffix for both normal pi sessions and child subagent sessions
 
 ### Files modified
+
+#### `pi-extension/subagents/index.ts`
+
+1. **Changed** `getDefaultSessionDirFor()` line ~131: `` `--${...}--` `` → `` `-${...}-` ``
+2. **Added** `// PATCH(local):` marker so upstream merges can be verified with `grep`
 
 #### `node_modules/@mariozechner/pi-coding-agent/dist/core/session-manager.js`
 
 1. **Changed** line ~209: `` `--${...}--` `` → `` `-${...}-` ``
+
+### How to re-apply after an upstream merge
+
+If upstream changes `getDefaultSessionDirFor()` in `pi-extension/subagents/index.ts`:
+- Keep the helper on single-dash delimiters: `` `-${...}-` ``
+- Keep the `// PATCH(local): single dash delimiters` marker comment
 
 ### How to re-apply after `npm install`
 
