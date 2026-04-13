@@ -151,6 +151,34 @@ subagent({ name: "Designer", agent: "game-designer", cwd: "agents/game-designer"
 
 ---
 
+## caller_ping — Child-to-Parent Help Request
+
+The `caller_ping` tool lets a subagent request help from its parent agent. When called, the child session **exits** and the parent receives a notification with the help message. The parent can then **resume** the child session with a response using `subagent_resume`.
+
+**Parameters:**
+- `message` (required): What you need help with
+
+**Interaction flow:**
+1. Child calls `caller_ping({ message: "Not sure which schema to use" })`
+2. Child session exits (like `subagent_done`)
+3. Parent receives a steer notification: *"Sub-agent Worker needs help: Not sure which schema to use"*
+4. Parent resumes the child session via `subagent_resume` with the response
+5. Child picks up where it left off with the parent's guidance
+
+**Example:**
+```typescript
+// Inside a worker subagent
+await caller_ping({
+  message: "Found two conflicting migration files — should I use v1 or v2?"
+});
+// Session exits here. Parent receives the ping, then resumes this session
+// with guidance like "Use v2, v1 is deprecated"
+```
+
+> **Note:** `caller_ping` is only available inside subagent contexts. Calling it from a standalone pi session returns an error.
+
+---
+
 ## The `/plan` Workflow
 
 The `/plan` command orchestrates a full planning-to-implementation pipeline.

@@ -6,6 +6,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Box, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { writeFileSync } from "node:fs";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
   return agentStarted;
@@ -148,6 +149,40 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "caller_ping",
+    label: "Caller Ping",
+    description:
+      "Send a help request to the parent agent and exit this session. " +
+      "The parent will be notified with your message and can resume this session with a response. " +
+      "Use when you're stuck, need clarification, or need the parent to take action.",
+    parameters: Type.Object({
+      message: Type.String({ description: "What you need help with" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const sessionFile = process.env.PI_SUBAGENT_SESSION;
+      if (!sessionFile) {
+        throw new Error(
+          "caller_ping is only available in subagent contexts. " +
+            "PI_SUBAGENT_SESSION environment variable is not set.",
+        );
+      }
+
+      const exitData = {
+        type: "ping" as const,
+        name: process.env.PI_SUBAGENT_NAME ?? "subagent",
+        message: params.message,
+      };
+      writeFileSync(`${sessionFile}.exit`, JSON.stringify(exitData));
+
+      ctx.shutdown();
+      return {
+        content: [{ type: "text", text: "Ping sent. Session will exit and parent will be notified." }],
+        details: {},
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "subagent_done",
     label: "Subagent Done",
     description:
@@ -156,6 +191,10 @@ export default function (pi: ExtensionAPI) {
       "Your LAST assistant message before calling this becomes the summary returned to the caller.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const sessionFile = process.env.PI_SUBAGENT_SESSION;
+      if (sessionFile) {
+        writeFileSync(`${sessionFile}.exit`, JSON.stringify({ type: "done" }));
+      }
       ctx.shutdown();
       return {
         content: [{ type: "text", text: "Shutting down subagent session." }],

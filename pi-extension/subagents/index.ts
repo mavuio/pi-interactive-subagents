@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type, type Static } from "@sinclair/typebox";
 import { Box, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { dirname, join } from "node:path";
 import {
@@ -109,6 +109,33 @@ function getAgentConfigDir(): string {
   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 }
 
+function resolveSubagentPaths(
+  params: Static<typeof SubagentParams>,
+  agentDefs: AgentDefaults | null,
+): { effectiveCwd: string | null; localAgentDir: string | null; effectiveAgentDir: string } {
+  const rawCwd = params.cwd ?? agentDefs?.cwd ?? null;
+  const cwdIsFromAgent = !params.cwd && agentDefs?.cwd != null;
+  const cwdBase = cwdIsFromAgent ? getAgentConfigDir() : process.cwd();
+  const effectiveCwd = rawCwd
+    ? rawCwd.startsWith("/")
+      ? rawCwd
+      : join(cwdBase, rawCwd)
+    : null;
+  const localAgentDir = effectiveCwd ? join(effectiveCwd, ".pi", "agent") : null;
+  const effectiveAgentDir =
+    localAgentDir && existsSync(localAgentDir) ? localAgentDir : getAgentConfigDir();
+  return { effectiveCwd, localAgentDir, effectiveAgentDir };
+}
+
+function getDefaultSessionDirFor(cwd: string, agentDir: string): string {
+  const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  const sessionDir = join(agentDir, "sessions", safePath);
+  if (!existsSync(sessionDir)) {
+    mkdirSync(sessionDir, { recursive: true });
+  }
+  return sessionDir;
+}
+
 function loadAgentDefaults(agentName: string): AgentDefaults | null {
   const configDir = getAgentConfigDir();
   const paths = [
@@ -213,6 +240,7 @@ interface SubagentResult {
   exitCode: number;
   elapsed: number;
   error?: string;
+  ping?: { name: string; message: string };
 }
 
 /**
@@ -394,7 +422,9 @@ async function launchSubagent(
   const sessionFile = ctx.sessionManager.getSessionFile();
   if (!sessionFile) throw new Error("No session file");
 
-  const sessionDir = dirname(sessionFile);
+  const { effectiveCwd, localAgentDir, effectiveAgentDir } = resolveSubagentPaths(params, agentDefs);
+  const targetCwdForSession = effectiveCwd ?? ctx.cwd;
+  const sessionDir = getDefaultSessionDirFor(targetCwdForSession, effectiveAgentDir);
 
   // Generate a deterministic session file path for this subagent.
   // This eliminates race conditions when multiple agents launch simultaneously —
@@ -544,8 +574,11 @@ async function launchSubagent(
   // Build env prefix: denied tools + subagent identity + config dir propagation
   const envParts: string[] = [];
 
-  // Propagate PI_CODING_AGENT_DIR so subagents use the same config root
-  if (process.env.PI_CODING_AGENT_DIR) {
+  // If the target cwd has its own .pi/agent/, use that as the config root.
+  // Otherwise propagate the current/global agent dir.
+  if (localAgentDir && existsSync(localAgentDir)) {
+    envParts.push(`PI_CODING_AGENT_DIR=${shellEscape(localAgentDir)}`);
+  } else if (process.env.PI_CODING_AGENT_DIR) {
     envParts.push(`PI_CODING_AGENT_DIR=${shellEscape(process.env.PI_CODING_AGENT_DIR)}`);
   }
 
@@ -559,6 +592,8 @@ async function launchSubagent(
   if (agentDefs?.autoExit) {
     envParts.push(`PI_SUBAGENT_AUTO_EXIT=1`);
   }
+  envParts.push(`PI_SUBAGENT_SESSION=${shellEscape(subagentSessionFile)}`);
+  envParts.push(`PI_SUBAGENT_SURFACE=${shellEscape(surface)}`);
   const envPrefix = envParts.join(" ") + " ";
 
   // Pass task to the sub-agent.
@@ -586,17 +621,7 @@ async function launchSubagent(
   }
 
   // Resolve cwd — param overrides agent default, supports absolute and relative paths.
-  // For agent-default cwd (from the .md definition), resolve relative to the config dir
-  // where the agent was discovered — not process.cwd(). This allows agents to find their
-  // role folders when PI_CODING_AGENT_DIR points to a different directory than cwd.
-  const rawCwd = params.cwd ?? agentDefs?.cwd ?? null;
-  const cwdIsFromAgent = !params.cwd && agentDefs?.cwd != null;
-  const cwdBase = cwdIsFromAgent ? getAgentConfigDir() : process.cwd();
-  const effectiveCwd = rawCwd
-    ? rawCwd.startsWith("/")
-      ? rawCwd
-      : join(cwdBase, rawCwd)
-    : null;
+  // This was already computed above so session placement, PI_CODING_AGENT_DIR, and cd agree.
   const cdPrefix = effectiveCwd ? `cd ${shellEscape(effectiveCwd)} && ` : "";
 
   const piCommand = cdPrefix + envPrefix + parts.join(" ");
@@ -629,8 +654,9 @@ async function watchSubagent(
   const { name, task, surface, startTime, sessionFile } = running;
 
   try {
-    const exitCode = await pollForExit(surface, signal, {
+    const result = await pollForExit(surface, signal, {
       interval: 1000,
+      sessionFile,
       onTick() {
         // Update entries/bytes for widget display
         try {
@@ -652,20 +678,20 @@ async function watchSubagent(
       const allEntries = getNewEntries(sessionFile, 0);
       summary =
         findLastAssistantMessage(allEntries) ??
-        (exitCode !== 0
-          ? `Sub-agent exited with code ${exitCode}`
+        (result.exitCode !== 0
+          ? `Sub-agent exited with code ${result.exitCode}`
           : "Sub-agent exited without output");
     } else {
       summary =
-        exitCode !== 0
-          ? `Sub-agent exited with code ${exitCode}`
+        result.exitCode !== 0
+          ? `Sub-agent exited with code ${result.exitCode}`
           : "Sub-agent exited without output";
     }
 
     closeSurface(surface);
     runningSubagents.delete(running.id);
 
-    return { name, task, summary, sessionFile, exitCode, elapsed };
+    return { name, task, summary, sessionFile, exitCode: result.exitCode, elapsed, ping: result.ping };
   } catch (err: any) {
     try {
       closeSurface(surface);
@@ -788,6 +814,27 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         watchSubagent(running, watcherAbort.signal)
           .then((result) => {
             updateWidget(); // reflect removal from Map immediately
+
+            if (result.ping) {
+              // Subagent is requesting help — steer a ping message with session path for resume
+              const sessionRef = `\n\nSession: ${result.sessionFile}\nResume: pi --session ${result.sessionFile}`;
+              pi.sendMessage(
+                {
+                  customType: "subagent_ping",
+                  content: `Sub-agent "${result.ping.name}" needs help (${formatElapsed(result.elapsed)}):\n\n${result.ping.message}${sessionRef}`,
+                  display: true,
+                  details: {
+                    name: result.ping.name,
+                    message: result.ping.message,
+                    agent: running.agent,
+                    sessionFile: result.sessionFile,
+                  },
+                },
+                { triggerTurn: true, deliverAs: "steer" },
+              );
+              return;
+            }
+
             const sessionRef = result.sessionFile
               ? `\n\nSession: ${result.sessionFile}\nResume: pi --session ${result.sessionFile}`
               : "";
@@ -1150,6 +1197,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         watchSubagent(running, watcherAbort.signal)
           .then((result) => {
             updateWidget();
+
+            if (result.ping) {
+              const sessionRef = `\n\nSession: ${params.sessionPath}\nResume: pi --session ${params.sessionPath}`;
+              pi.sendMessage(
+                {
+                  customType: "subagent_ping",
+                  content: `Sub-agent "${result.ping.name}" needs help (${formatElapsed(result.elapsed)}):\n\n${result.ping.message}${sessionRef}`,
+                  display: true,
+                  details: {
+                    name: result.ping.name,
+                    message: result.ping.message,
+                    sessionFile: params.sessionPath,
+                  },
+                },
+                { triggerTurn: true, deliverAs: "steer" },
+              );
+              return;
+            }
+
             const allEntries = getNewEntries(params.sessionPath, entryCountBefore);
             const summary =
               findLastAssistantMessage(allEntries) ??
@@ -1294,6 +1360,42 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         // Render via Box for background + padding, with blank line above for separation
+        const box = new Box(1, 1, bgFn);
+        box.addChild(new Text(contentLines.join("\n"), 0, 0));
+        return ["", ...box.render(width)];
+      },
+    };
+  });
+
+  // ── subagent_ping message renderer ──
+  pi.registerMessageRenderer("subagent_ping", (message, options, theme) => {
+    const details = message.details as any;
+    if (!details) return undefined;
+
+    return {
+      render(width: number): string[] {
+        const name = details.name ?? "subagent";
+        const agentTag = details.agent ? theme.fg("dim", ` (${details.agent})`) : "";
+        const bgFn = (text: string) => theme.bg("toolSuccessBg", text);
+
+        const icon = theme.fg("accent", "?");
+        const header = `${icon} ${theme.fg("toolTitle", theme.bold(name))}${agentTag} ${theme.fg("dim", "— needs help")}`;
+
+        const contentLines = [header];
+
+        if (options.expanded) {
+          contentLines.push("");
+          contentLines.push(details.message ?? "");
+          if (details.sessionFile) {
+            contentLines.push("");
+            contentLines.push(theme.fg("dim", `Session: ${details.sessionFile}`));
+          }
+        } else {
+          const preview = (details.message ?? "").split("\n")[0].slice(0, width - 10);
+          contentLines.push(theme.fg("dim", preview));
+          contentLines.push(theme.fg("muted", keyHint("app.tools.expand", "to expand")));
+        }
+
         const box = new Box(1, 1, bgFn);
         box.addChild(new Text(contentLines.join("\n"), 0, 0));
         return ["", ...box.render(width)];
