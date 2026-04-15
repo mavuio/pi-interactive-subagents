@@ -41,10 +41,10 @@ grep -rn "PATCH(local)" node_modules/@mariozechner/pi-coding-agent/dist/
 # Expected output (6 repo matches + 1 node_modules match):
 #   cmux.ts:179   — PATCH(local): sessionNameSetter declaration
 #   cmux.ts:432   — PATCH(local): sessionNameSetter?.(title) call
-#   index.ts:27   — PATCH(local): setSessionNameCallback import
-#   index.ts:131  — PATCH(local): single-dash child session dirs
-#   index.ts:726  — PATCH(local): setSessionNameCallback wiring in session_start
-#   index.ts:876  — PATCH(local): pi.setSessionName on subagent launch
+#   index.ts:26   — PATCH(local): setSessionNameCallback import
+#   index.ts:130  — PATCH(local): single-dash child session dirs
+#   index.ts:740  — PATCH(local): setSessionNameCallback wiring in session_start
+#   index.ts:890  — PATCH(local): pi.setSessionName on subagent launch
 #   core/session-manager.js:209 — PATCH(local): single-dash default session dir
 
 # 4. Review local agent overrides outside this repo
