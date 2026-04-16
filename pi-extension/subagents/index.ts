@@ -10,6 +10,8 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
+  copyFileSync,
+  unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -24,6 +26,7 @@ import {
   renameCurrentTab,
   renameWorkspace,
   setSessionNameCallback, // PATCH(local): see PATCHES.md § cmux-session-name
+  readScreen,
 } from "./cmux.ts";
 import { getNewEntries, findLastAssistantMessage } from "./session.ts";
 
@@ -58,6 +61,12 @@ const SubagentParams = Type.Object({
         "Fork the current session — sub-agent gets full conversation context. Use for iterate/bugfix patterns.",
     }),
   ),
+  resumeSessionId: Type.Optional(
+    Type.String({
+      description:
+        "Resume a previous Claude Code session by its ID. Loads the conversation history and continues where it left off. The session ID is returned in details of every claude tool call. Use this to retry cancelled runs or ask follow-up questions.",
+    }),
+  ),
 });
 
 interface AgentDefaults {
@@ -70,6 +79,7 @@ interface AgentDefaults {
   autoExit?: boolean;
   systemPromptMode?: "append" | "replace";
   cwd?: string;
+  cli?: string;
   body?: string;
 }
 
@@ -167,6 +177,7 @@ function loadAgentDefaults(agentName: string): AgentDefaults | null {
       spawning: spawningRaw != null ? spawningRaw === "true" : undefined,
       autoExit: autoExitRaw != null ? autoExitRaw === "true" : undefined,
       cwd: get("cwd"),
+      cli: get("cli"),
       body: body || undefined,
     };
   }
@@ -236,6 +247,7 @@ interface SubagentResult {
   task: string;
   summary: string;
   sessionFile?: string;
+  claudeSessionId?: string;  // For Claude Code resume capability
   exitCode: number;
   elapsed: number;
   error?: string;
@@ -257,6 +269,8 @@ interface RunningSubagent {
   entries?: number;
   bytes?: number;
   abortController?: AbortController;
+  cli?: string;
+  sentinelFile?: string;
 }
 
 /** All currently running subagents, keyed by id. */
@@ -351,7 +365,9 @@ function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): st
     const right =
       agent.entries != null && agent.bytes != null
         ? ` ${agent.entries} msgs (${formatBytes(agent.bytes)}) `
-        : " starting… ";
+        : agent.cli === "claude"
+          ? " running… "
+          : " starting… ";
 
     lines.push(borderLine(left, right, width));
   }
@@ -447,6 +463,76 @@ async function launchSubagent(
   if (!surfacePreCreated) {
     await new Promise<void>((resolve) => setTimeout(resolve, 500));
   }
+
+  // ── Claude Code CLI path ──
+  if (agentDefs?.cli === "claude") {
+    const sentinelFile = `/tmp/pi-claude-${id}-done`;
+    const pluginDir = join(dirname(new URL(import.meta.url).pathname), "plugin");
+
+    const cmdParts: string[] = [];
+    cmdParts.push(`PI_CLAUDE_SENTINEL=${shellEscape(sentinelFile)}`);
+    cmdParts.push("claude");
+    cmdParts.push("--dangerously-skip-permissions");
+
+    if (existsSync(pluginDir)) {
+      cmdParts.push("--plugin-dir", shellEscape(pluginDir));
+    }
+
+    if (effectiveModel) {
+      cmdParts.push("--model", shellEscape(effectiveModel));
+    }
+
+    const sp = params.systemPrompt ?? agentDefs?.body;
+    if (sp) {
+      cmdParts.push("--append-system-prompt", shellEscape(sp));
+    }
+
+    if (params.resumeSessionId) {
+      cmdParts.push("--resume", shellEscape(params.resumeSessionId));
+    }
+
+    // Always pass the task as the prompt — even for resumed sessions,
+    // the caller's task is the follow-up instruction.
+    cmdParts.push(shellEscape(params.task));
+
+    const cdPrefix = effectiveCwd ? `cd ${shellEscape(effectiveCwd)} && ` : "";
+    const command = `${cdPrefix}${cmdParts.join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
+
+    const launchScriptName = `${(params.name || "subagent")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "subagent"}-${id}.sh`;
+    const launchScriptFile = join(artifactDir, "subagent-scripts", launchScriptName);
+
+    sendLongCommand(surface, command, {
+      scriptPath: launchScriptFile,
+      scriptPreamble: [
+        `# Claude Code subagent launch script for ${params.name}`,
+        `# Generated: ${new Date().toISOString()}`,
+        `# Surface: ${surface}`,
+      ].join("\n"),
+    });
+
+    const running: RunningSubagent = {
+      id,
+      name: params.name,
+      task: params.task,
+      agent: params.agent,
+      surface,
+      startTime,
+      sessionFile: subagentSessionFile,
+      launchScriptFile,
+      cli: "claude",
+      sentinelFile,
+    };
+
+    runningSubagents.set(id, running);
+    return running;
+  }
+
+  // ── Pi CLI path (existing, unchanged) ──
 
   // Build the task message
   // When forking, the sub-agent already has the full conversation context.
@@ -661,6 +747,27 @@ async function launchSubagent(
  * the summary from the session file, cleans up the surface,
  * and removes the entry from runningSubagents.
  */
+const CLAUDE_SESSIONS_DIR = join(
+  process.env.HOME ?? "/tmp",
+  ".pi", "agent", "sessions", "claude-code",
+);
+
+function copyClaudeSession(sentinelFile: string): string | null {
+  try {
+    const transcriptFile = sentinelFile + ".transcript";
+    if (!existsSync(transcriptFile)) return null;
+    const transcriptPath = readFileSync(transcriptFile, "utf-8").trim();
+    if (!transcriptPath || !existsSync(transcriptPath)) return null;
+    mkdirSync(CLAUDE_SESSIONS_DIR, { recursive: true });
+    const filename = transcriptPath.split("/").pop() ?? `claude-${Date.now()}.jsonl`;
+    const dest = join(CLAUDE_SESSIONS_DIR, filename);
+    copyFileSync(transcriptPath, dest);
+    return filename;
+  } catch {
+    return null;
+  }
+}
+
 async function watchSubagent(
   running: RunningSubagent,
   signal: AbortSignal,
@@ -671,22 +778,60 @@ async function watchSubagent(
     const result = await pollForExit(surface, signal, {
       interval: 1000,
       sessionFile,
+      sentinelFile: running.sentinelFile,
       onTick() {
-        // Update entries/bytes for widget display
-        try {
-          if (existsSync(sessionFile)) {
-            const stat = statSync(sessionFile);
-            const raw = readFileSync(sessionFile, "utf8");
-            running.entries = raw.split("\n").filter((l) => l.trim()).length;
-            running.bytes = stat.size;
-          }
-        } catch {}
+        if (running.cli !== "claude") {
+          try {
+            if (existsSync(sessionFile)) {
+              const stat = statSync(sessionFile);
+              const raw = readFileSync(sessionFile, "utf8");
+              running.entries = raw.split("\n").filter((l) => l.trim()).length;
+              running.bytes = stat.size;
+            }
+          } catch {}
+        }
       },
     });
 
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
-    // Extract summary from the known session file
+    if (running.cli === "claude") {
+      // Claude Code result extraction
+      let summary = "";
+
+      if (running.sentinelFile) {
+        try {
+          summary = readFileSync(running.sentinelFile, "utf-8").trim();
+        } catch {}
+      }
+
+      if (!summary) {
+        summary = readScreen(surface, 200)
+          .replace(/__SUBAGENT_DONE_\d+__/, "")
+          .trimEnd();
+      }
+
+      if (!summary) {
+        summary = result.exitCode !== 0
+          ? `Claude Code exited with code ${result.exitCode}`
+          : "Claude Code exited without output";
+      }
+
+      // Copy Claude session transcript
+      let sessionId: string | null = null;
+      if (running.sentinelFile) {
+        sessionId = copyClaudeSession(running.sentinelFile);
+        try { unlinkSync(running.sentinelFile); } catch {}
+        try { unlinkSync(running.sentinelFile + ".transcript"); } catch {}
+      }
+
+      closeSurface(surface);
+      runningSubagents.delete(running.id);
+
+      return { name, task, summary, exitCode: result.exitCode, elapsed, ...(sessionId ? { claudeSessionId: sessionId } : {}) };
+    }
+
+    // Pi subagent result extraction (existing, unchanged)
     let summary: string;
     if (existsSync(sessionFile)) {
       const allEntries = getNewEntries(sessionFile, 0);
@@ -869,6 +1014,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
                   exitCode: result.exitCode,
                   elapsed: result.elapsed,
                   sessionFile: result.sessionFile,
+                  ...(result.claudeSessionId ? { claudeSessionId: result.claudeSessionId } : {}),
                 },
               },
               { triggerTurn: true, deliverAs: "steer" },
