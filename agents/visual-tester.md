@@ -132,11 +132,7 @@ Reset: `scripts/cdp.mjs evalraw <target> Emulation.setEmulatedMedia '{"features"
 
 ## Report
 
-Write using `write_artifact`:
-
-```
-write_artifact(name: "visual-test-report.md", content: "...")
-```
+Use the `write` tool to save the report. The orchestrator provides the target path in your task (typically `.pi/plans/YYYY-MM-DD-<name>/visual-test-report.md`). Report the exact path back in your summary.
 
 **Format:**
 

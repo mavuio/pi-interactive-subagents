@@ -14,6 +14,7 @@ import {
   appendBranchSummary,
   copySessionFile,
   mergeNewEntries,
+  seedSubagentSessionFile,
 } from "../pi-extension/subagents/session.ts";
 
 import { shellEscape, isCmuxAvailable, isWezTermAvailable } from "../pi-extension/subagents/cmux.ts";
@@ -33,6 +34,77 @@ function createSessionFile(dir: string, entries: object[]): string {
   const content = entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
   writeFileSync(file, content);
   return file;
+}
+
+function createMockExtensionApi() {
+  const registeredTools: Array<any> = [];
+  const registeredCommands: Array<any> = [];
+  return {
+    registeredTools,
+    registeredCommands,
+    api: {
+      on() {},
+      registerTool(tool: any) {
+        registeredTools.push(tool);
+      },
+      registerCommand(name: string, command: any) {
+        registeredCommands.push({ name, ...command });
+      },
+      registerMessageRenderer() {},
+      registerShortcut() {},
+      getAllTools() {
+        return [];
+      },
+    } as any,
+  };
+}
+
+function restoreEnvVar(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}
+
+function writeAgentFile(
+  agentsDir: string,
+  name: string,
+  frontmatter: string,
+  body = "You are a test agent.",
+) {
+  mkdirSync(agentsDir, { recursive: true });
+  writeFileSync(join(agentsDir, `${name}.md`), `---\n${frontmatter}\n---\n\n${body}\n`);
+}
+
+async function withIsolatedAgentEnv(
+  fn: (paths: {
+    projectDir: string;
+    projectAgentsDir: string;
+    globalDir: string;
+    globalAgentsDir: string;
+  }) => Promise<void> | void,
+) {
+  const root = createTestDir();
+  const previousCwd = process.cwd();
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const projectDir = join(root, "project");
+  const projectAgentsDir = join(projectDir, ".pi", "agents");
+  const globalDir = join(root, "global");
+  const globalAgentsDir = join(globalDir, "agents");
+
+  mkdirSync(projectAgentsDir, { recursive: true });
+  mkdirSync(globalAgentsDir, { recursive: true });
+  process.chdir(projectDir);
+  process.env.PI_CODING_AGENT_DIR = globalDir;
+
+  try {
+    await fn({ projectDir, projectAgentsDir, globalDir, globalAgentsDir });
+  } finally {
+    process.chdir(previousCwd);
+    restoreEnvVar("PI_CODING_AGENT_DIR", previousAgentDir);
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 const SESSION_HEADER = { type: "session", id: "sess-001", version: 3 };
@@ -248,6 +320,257 @@ describe("session.ts", () => {
       // Target should now have 3 entries
       const targetLines = readFileSync(targetFile, "utf8").trim().split("\n");
       assert.equal(targetLines.length, 3);
+    });
+  });
+});
+
+describe("seedSubagentSessionFile", () => {
+  let dir: string;
+  before(() => {
+    dir = createTestDir();
+  });
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("creates a lineage-only child session with parent linkage and no copied turns", () => {
+    const parentFile = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
+    const childFile = join(dir, "lineage-child.jsonl");
+
+    seedSubagentSessionFile({
+      mode: "lineage-only",
+      parentSessionFile: parentFile,
+      childSessionFile: childFile,
+      childCwd: "/tmp/child-cwd",
+    });
+
+    const lines = readFileSync(childFile, "utf8").trim().split("\n");
+    assert.equal(lines.length, 1);
+
+    const header = JSON.parse(lines[0]);
+    assert.equal(header.type, "session");
+    assert.equal(header.parentSession, parentFile);
+    assert.equal(header.cwd, "/tmp/child-cwd");
+  });
+
+  it("creates a forked child session with copied context before the triggering user turn", () => {
+    const parentFile = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
+    const childFile = join(dir, "fork-child.jsonl");
+
+    seedSubagentSessionFile({
+      mode: "fork",
+      parentSessionFile: parentFile,
+      childSessionFile: childFile,
+      childCwd: "/tmp/fork-child-cwd",
+    });
+
+    const entries = readFileSync(childFile, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0].type, "session");
+    assert.equal(entries[0].parentSession, parentFile);
+    assert.equal(entries[0].cwd, "/tmp/fork-child-cwd");
+    assert.equal(entries[1].type, "model_change");
+    assert.equal(entries.some((entry) => entry.type === "message"), false);
+  });
+});
+
+describe("subagent discovery", () => {
+  const testApi = (subagentsModule as any).__test__;
+
+  it("loads session-mode from frontmatter", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(
+        projectAgentsDir,
+        "lineage-mode-test-agent",
+        [
+          "name: lineage-mode-test-agent",
+          "model: anthropic/test-lineage",
+          "session-mode: lineage-only",
+        ].join("\n"),
+      );
+
+      const loaded = testApi.loadAgentDefaults("lineage-mode-test-agent");
+      assert.ok(loaded, "expected agent to load");
+      assert.equal(loaded.sessionMode, "lineage-only");
+    });
+  });
+
+  it("ignores invalid session-mode values", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(
+        projectAgentsDir,
+        "invalid-mode-test-agent",
+        [
+          "name: invalid-mode-test-agent",
+          "model: anthropic/test-invalid",
+          "session-mode: sideways",
+        ].join("\n"),
+      );
+
+      const loaded = testApi.loadAgentDefaults("invalid-mode-test-agent");
+      assert.ok(loaded, "expected agent to load");
+      assert.equal(loaded.sessionMode, undefined);
+    });
+  });
+
+  it("resolves session mode with fork override precedence", () => {
+    assert.equal(testApi.resolveEffectiveSessionMode({ name: "A", task: "T" }, null), "standalone");
+    assert.equal(
+      testApi.resolveEffectiveSessionMode({ name: "A", task: "T" }, { sessionMode: "lineage-only" }),
+      "lineage-only",
+    );
+    assert.equal(
+      testApi.resolveEffectiveSessionMode(
+        { name: "A", task: "T", fork: true },
+        { sessionMode: "lineage-only" },
+      ),
+      "fork",
+    );
+  });
+
+  it("resolves launch behavior for standalone, lineage-only, and fork modes", () => {
+    assert.deepEqual(testApi.resolveLaunchBehavior({ name: "A", task: "T" }, null), {
+      sessionMode: "standalone",
+      seededSessionMode: null,
+      inheritsConversationContext: false,
+      taskDelivery: "artifact",
+    });
+    assert.deepEqual(
+      testApi.resolveLaunchBehavior({ name: "A", task: "T" }, { sessionMode: "lineage-only" }),
+      {
+        sessionMode: "lineage-only",
+        seededSessionMode: "lineage-only",
+        inheritsConversationContext: false,
+        taskDelivery: "artifact",
+      },
+    );
+    assert.deepEqual(
+      testApi.resolveLaunchBehavior({ name: "A", task: "T" }, { sessionMode: "fork" }),
+      {
+        sessionMode: "fork",
+        seededSessionMode: "fork",
+        inheritsConversationContext: true,
+        taskDelivery: "direct",
+      },
+    );
+    assert.deepEqual(
+      testApi.resolveLaunchBehavior(
+        { name: "A", task: "T", fork: true },
+        { sessionMode: "lineage-only" },
+      ),
+      {
+        sessionMode: "fork",
+        seededSessionMode: "fork",
+        inheritsConversationContext: true,
+        taskDelivery: "direct",
+      },
+    );
+  });
+
+  it("lists visible agents from discovery", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(
+        projectAgentsDir,
+        "visible-discovery-test-agent",
+        [
+          "name: visible-discovery-test-agent",
+          "description: Visible test agent",
+          "model: anthropic/test-visible",
+        ].join("\n"),
+      );
+
+      const { api, registeredTools } = createMockExtensionApi();
+      (subagentsModule as any).default(api);
+
+      const tool = registeredTools.find((t) => t.name === "subagents_list");
+      assert.ok(tool, "expected subagents_list to be registered");
+
+      const result = await tool.execute();
+      const agents = result.details?.agents ?? [];
+
+      assert.ok(agents.some((agent: any) => agent.name === "visible-discovery-test-agent"));
+      assert.match(result.content[0].text, /visible-discovery-test-agent/);
+    });
+  });
+
+  it("hides disable-model-invocation agents from listings but keeps direct loading", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(
+        projectAgentsDir,
+        "hidden-discovery-test-agent",
+        [
+          "name: hidden-discovery-test-agent",
+          "description: Hidden test agent",
+          "model: anthropic/test-hidden",
+          "disable-model-invocation: true",
+        ].join("\n"),
+        "You are the hidden agent.",
+      );
+
+      const { api, registeredTools } = createMockExtensionApi();
+      (subagentsModule as any).default(api);
+
+      const tool = registeredTools.find((t) => t.name === "subagents_list");
+      assert.ok(tool, "expected subagents_list to be registered");
+
+      const result = await tool.execute();
+      const agents = result.details?.agents ?? [];
+
+      assert.equal(agents.some((agent: any) => agent.name === "hidden-discovery-test-agent"), false);
+      assert.doesNotMatch(result.content[0].text, /hidden-discovery-test-agent/);
+
+      const loaded = testApi.loadAgentDefaults("hidden-discovery-test-agent");
+      assert.ok(loaded, "expected hidden agent to remain directly loadable");
+      assert.equal(loaded.model, "anthropic/test-hidden");
+      assert.equal(loaded.body, "You are the hidden agent.");
+      assert.equal(loaded.disableModelInvocation, true);
+    });
+  });
+
+  it("lets a hidden project agent shadow a visible global agent", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir, globalAgentsDir }) => {
+      writeAgentFile(
+        globalAgentsDir,
+        "shadowed-discovery-test-agent",
+        [
+          "name: shadowed-discovery-test-agent",
+          "description: Global visible agent",
+          "model: anthropic/test-global",
+        ].join("\n"),
+        "You are the global visible agent.",
+      );
+      writeAgentFile(
+        projectAgentsDir,
+        "shadowed-discovery-test-agent",
+        [
+          "name: shadowed-discovery-test-agent",
+          "description: Project hidden agent",
+          "model: anthropic/test-project",
+          "disable-model-invocation: true",
+        ].join("\n"),
+        "You are the project hidden agent.",
+      );
+
+      const { api, registeredTools } = createMockExtensionApi();
+      (subagentsModule as any).default(api);
+
+      const tool = registeredTools.find((t) => t.name === "subagents_list");
+      assert.ok(tool, "expected subagents_list to be registered");
+
+      const result = await tool.execute();
+      const agents = result.details?.agents ?? [];
+
+      assert.equal(agents.some((agent: any) => agent.name === "shadowed-discovery-test-agent"), false);
+      assert.doesNotMatch(result.content[0].text, /shadowed-discovery-test-agent/);
+
+      const loaded = testApi.loadAgentDefaults("shadowed-discovery-test-agent");
+      assert.ok(loaded, "expected project override to remain directly loadable");
+      assert.equal(loaded.model, "anthropic/test-project");
+      assert.equal(loaded.body, "You are the project hidden agent.");
+      assert.equal(loaded.disableModelInvocation, true);
     });
   });
 });

@@ -15,31 +15,6 @@ A planning workflow that separates WHAT (spec) from HOW (plan). First a spec age
 
 ---
 
-## Tab Titles
-
-Use `set_tab_title` to keep the user informed of progress in the multiplexer UI. Update the title at every phase transition.
-
-| Phase         | Title example                                                  |
-| ------------- | -------------------------------------------------------------- |
-| Assessment    | `🔍 Assessing: <short task>`                                   |
-| Scouting      | `🔍 Scouting: <short task>`                                    |
-| Spec          | `📝 Spec: <short task>`                                        |
-| Planning      | `💬 Planning: <short task>`                                    |
-| Review plan   | `📋 Review: <short task>`                                      |
-| Executing     | `🔨 Executing: 1/3 — <short task>` (update counter per worker) |
-| Reviewing     | `🔎 Reviewing: <short task>`                                   |
-| Done          | `✅ Done: <short task>`                                        |
-
-Name subagents with context too:
-
-- Scout: `"🔍 Scout"` (default is fine)
-- Spec: `"📝 Spec"`
-- Planner: `"💬 Planner"`
-- Workers: `"🔨 Worker 1/3"`, `"🔨 Worker 2/3"`, etc.
-- Reviewer: `"🔎 Reviewer"`
-
----
-
 ## The Flow
 
 ```
@@ -76,6 +51,19 @@ Spend ~30 seconds. You're looking for: tech stack, project shape, and the area r
 
 ---
 
+## Artifact Paths
+
+For a planning run, pick a short `<name>` (e.g. `auth-redesign`) and use a shared directory under `.pi/plans/YYYY-MM-DD-<name>/` for every deliverable. Pass explicit paths in each subagent's task and read them back with the plain `read` tool when a subagent finishes.
+
+Standard filenames:
+
+- `.pi/plans/YYYY-MM-DD-<name>/scout-context.md`
+- `.pi/plans/YYYY-MM-DD-<name>/spec.md`
+- `.pi/plans/YYYY-MM-DD-<name>/plan.md`
+- `.pi/plans/YYYY-MM-DD-<name>/review.md` (optional, for reviewer output)
+
+---
+
 ## Phase 2: Scout
 
 **Always spawn a scout before spec/planner.** The scout's context feeds into both — it helps the spec agent ask better questions and helps the planner make better design decisions.
@@ -84,11 +72,13 @@ Spend ~30 seconds. You're looking for: tech stack, project shape, and the area r
 subagent({
   name: "🔍 Scout",
   agent: "scout",
-  task: "Analyze the codebase for [user's request area]. Map file structure, key modules, patterns, conventions, and existing code related to [feature area]. Focus on what a spec agent and planner would need to understand.",
+  task: `Analyze the codebase for [user's request area]. Map file structure, key modules, patterns, conventions, and existing code related to [feature area]. Focus on what a spec agent and planner would need to understand.
+
+Save your findings to: .pi/plans/YYYY-MM-DD-<name>/scout-context.md`,
 });
 ```
 
-**Wait for the scout to finish.** Read the scout's context artifact — you'll pass it to both spec and planner.
+**Wait for the scout to finish.** Read the scout's context file with the `read` tool — you'll pass it to both spec and planner.
 
 ---
 
@@ -104,11 +94,13 @@ subagent({
   task: `Define spec: [what the user wants to build]
 
 Scout context:
-[paste scout findings here — file structure, conventions, patterns, relevant code]`,
+[paste scout findings here — file structure, conventions, patterns, relevant code]
+
+Save the final spec to: .pi/plans/YYYY-MM-DD-<name>/spec.md`,
 });
 ```
 
-**The user works with the spec agent.** When the spec is complete, the spec agent should summarize, call `subagent_done`, and return the spec artifact path automatically. The user can still press Ctrl+D to leave early.
+**The user works with the spec agent.** When the spec is complete, the spec agent should summarize, call `subagent_done`, and return the spec file path automatically. The user can still press Ctrl+D to leave early.
 
 ---
 
@@ -118,16 +110,18 @@ Read the spec artifact, then spawn the planner. Pass both the spec AND the scout
 
 ```typescript
 // Read the spec first
-read_artifact({ name: "specs/YYYY-MM-DD-<name>.md" });
+read({ path: ".pi/plans/YYYY-MM-DD-<name>/spec.md" });
 
 subagent({
   name: "💬 Planner",
   agent: "planner",
   interactive: true,
-  task: `Plan implementation for spec: specs/YYYY-MM-DD-<name>.md
+  task: `Plan implementation for spec at: .pi/plans/YYYY-MM-DD-<name>/spec.md
 
 Scout context:
-[paste scout findings here — same context from Phase 2]`,
+[paste scout findings here — same context from Phase 2]
+
+Save the final plan to: .pi/plans/YYYY-MM-DD-<name>/plan.md`,
 });
 ```
 

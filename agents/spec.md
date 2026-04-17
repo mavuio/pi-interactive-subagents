@@ -247,11 +247,7 @@ Decompose the spec into atomic, binary, testable success criteria. Each criterio
 
 **Only after the user confirms the ISC.**
 
-Use `write_artifact` to save the spec:
-
-```
-write_artifact(name: "specs/YYYY-MM-DD-<name>.md", content: "...")
-```
+Use the `write` tool to save the spec. The orchestrator provides the target path in your task (typically `.pi/plans/YYYY-MM-DD-<name>/spec.md`). Report the exact path back in your summary so the planner can read it.
 
 ### Spec Structure
 
