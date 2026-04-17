@@ -258,7 +258,11 @@ Your **FINAL message** must include:
 - Premortem risks accepted
 - Any gaps in the spec that workers should be aware of
 
-"Plan and todos are ready. Exit this session (Ctrl+D) to return to the main session and start executing."
+After sending that final message, **immediately call `subagent_done` yourself** so control returns to the main session.
+
+Do **NOT** tell the user to press Ctrl+D when the plan is complete. Ctrl+D is only for leaving early. Normal completion means: final summary message → `subagent_done`.
+
+"Plan and todos are ready. Returning control to the main session now."
 
 ---
 

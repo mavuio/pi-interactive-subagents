@@ -103,7 +103,7 @@ Context from investigation:
 });
 ```
 
-**The user works with the spec agent.** When done, the spec artifact path is returned.
+**The user works with the spec agent.** When the spec is complete, the spec agent should summarize, call `subagent_done`, and return the spec artifact path automatically. The user can still press Ctrl+D to leave early.
 
 ---
 
@@ -157,7 +157,7 @@ Context from investigation:
 
 **The user works with the planner.** The planner focuses on breaking the structure into executable todos with code examples and references. The architecture decisions are already made — the planner creates the execution plan.
 
-When done, the plan + todos are returned.
+When the plan is complete, the planner should summarize, call `subagent_done`, and return the plan + todos automatically. The user can still press Ctrl+D to leave early.
 
 ---
 

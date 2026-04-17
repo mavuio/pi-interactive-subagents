@@ -326,7 +326,11 @@ Your **FINAL message** must include:
 - Effort level chosen
 - Any open questions or decisions deferred to the planner
 
-> "Spec is ready at `specs/YYYY-MM-DD-<name>.md`. Exit this session (Ctrl+D) to return to the main session — the planner will take it from here."
+After sending that final message, **immediately call `subagent_done` yourself** so control returns to the main session.
+
+Do **NOT** tell the user to press Ctrl+D when the spec is complete. Ctrl+D is only for leaving early. Normal completion means: final summary message → `subagent_done`.
+
+> "Spec is ready at `specs/YYYY-MM-DD-<name>.md`. Returning control to the main session so the planner can take it from here."
 
 ---
 

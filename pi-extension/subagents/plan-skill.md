@@ -108,7 +108,7 @@ Scout context:
 });
 ```
 
-**The user works with the spec agent.** When done, they press Ctrl+D and the spec artifact path is returned.
+**The user works with the spec agent.** When the spec is complete, the spec agent should summarize, call `subagent_done`, and return the spec artifact path automatically. The user can still press Ctrl+D to leave early.
 
 ---
 
@@ -133,7 +133,7 @@ Scout context:
 
 **The user works with the planner.** The planner will NOT re-clarify requirements — that's already done in the spec. It focuses on technical approach, design validation, premortem risk analysis, and creating well-scoped todos.
 
-When done, the user presses Ctrl+D and the plan + todos are returned.
+When the plan is complete, the planner should summarize, call `subagent_done`, and return the plan + todos automatically. The user can still press Ctrl+D to leave early.
 
 ### Optional: Re-scout after planning
 
