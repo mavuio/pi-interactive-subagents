@@ -85,7 +85,10 @@ function getModuleAbortSignal(): AbortSignal {
 }
 
 const SubagentParams = Type.Object({
-  name: Type.String({ description: "Display name for the subagent" }),
+  name: Type.String({
+    description:
+      "Short, descriptive display name for the subagent. Used as the multiplexer tab label, so keep it compact and disambiguate when multiple subagents of the same kind run in parallel.",
+  }),
   task: Type.String({ description: "Task/prompt for the sub-agent" }),
   agent: Type.Optional(
     Type.String({
@@ -517,6 +520,36 @@ interface RunningSubagent {
 
 /** All currently running subagents, keyed by id. */
 const runningSubagents = new Map<string, RunningSubagent>();
+
+/**
+ * Emit lifecycle events ({@link `subagents:started`} / {@link `subagents:ended`})
+ * alongside mutations of `runningSubagents`. Other extensions (herdr state
+ * reporters, per-pane widgets, metrics) can react without needing to reach
+ * into our internal Map.
+ *
+ * Populated by the default export once the extension initializes. Events
+ * emitted before init are dropped silently.
+ */
+let emitSubagentLifecycle: ((type: "started" | "ended", running: RunningSubagent) => void) | null = null;
+
+function addRunningSubagent(running: RunningSubagent): void {
+  runningSubagents.set(running.id, running);
+  emitSubagentLifecycle?.("started", running);
+}
+
+function removeRunningSubagent(id: string): void {
+  const entry = runningSubagents.get(id);
+  if (!entry) return;
+  runningSubagents.delete(id);
+  emitSubagentLifecycle?.("ended", entry);
+}
+
+function clearRunningSubagents(): void {
+  for (const [, entry] of runningSubagents) {
+    emitSubagentLifecycle?.("ended", entry);
+  }
+  runningSubagents.clear();
+}
 
 // ── Widget management ──
 
@@ -1075,7 +1108,7 @@ async function launchSubagent(
       }),
     };
 
-    runningSubagents.set(id, running);
+    addRunningSubagent(running);
     return running;
   }
 
@@ -1213,7 +1246,7 @@ async function launchSubagent(
     }),
   };
 
-  runningSubagents.set(id, running);
+  addRunningSubagent(running);
   return running;
 }
 
@@ -1292,7 +1325,7 @@ async function watchSubagent(
       }
 
       closeSurface(surface);
-      runningSubagents.delete(running.id);
+      removeRunningSubagent(running.id);
 
       return { name, task, summary, exitCode: result.exitCode, elapsed, ...(sessionId ? { claudeSessionId: sessionId } : {}) };
     }
@@ -1317,7 +1350,7 @@ async function watchSubagent(
     }
 
     closeSurface(surface);
-    runningSubagents.delete(running.id);
+    removeRunningSubagent(running.id);
 
     return {
       name,
@@ -1333,7 +1366,7 @@ async function watchSubagent(
     try {
       closeSurface(surface);
     } catch {}
-    runningSubagents.delete(running.id);
+    removeRunningSubagent(running.id);
 
     if (signal.aborted) {
       return {
@@ -1358,6 +1391,21 @@ async function watchSubagent(
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
+  // Expose subagent lifecycle as pi events so other extensions (herdr state
+  // reporters, per-pane widgets, metrics) can react without reaching into
+  // our internal Map. Emitted events:
+  //   subagents:started — { id, name, agent, task, surface }
+  //   subagents:ended   — { id, name, agent, task, surface }
+  emitSubagentLifecycle = (type, running) => {
+    pi.events.emit(`subagents:${type}`, {
+      id: running.id,
+      name: running.name,
+      agent: running.agent,
+      task: running.task,
+      surface: running.surface,
+    });
+  };
+
   // Capture the UI context for widget updates
   pi.on("session_start", (_event, ctx) => {
     latestCtx = ctx;
@@ -1380,7 +1428,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     for (const [_id, agent] of runningSubagents) {
       agent.abortController?.abort();
     }
-    runningSubagents.clear();
+    clearRunningSubagents();
   });
 
   // Tools denied via PI_DENY_TOOLS env var (set by parent agent based on frontmatter)
@@ -1878,7 +1926,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             startTimeMs: startTime,
           }),
         };
-        runningSubagents.set(id, running);
+        addRunningSubagent(running);
         startWidgetRefresh();
         startStatusRefresh(pi);
 
